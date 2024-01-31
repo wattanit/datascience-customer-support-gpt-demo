@@ -29,12 +29,12 @@ async fn index() -> impl Responder {
 async fn main() -> std::io::Result<()> {
     println!("Starting server at http://127.0.0.1:8080/");
     HttpServer::new(|| {
-        App::new()
+        let scope = web::scope("/api/v1")
             .service(get_threads)
             .service(get_thread)
             .service(create_thread)
-            .service(create_message)
-            .service(index)
+            .service(create_message);
+        App::new().service(scope)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
