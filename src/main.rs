@@ -1,3 +1,5 @@
+mod entity;
+
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 
 #[get("/threads")]
@@ -10,6 +12,7 @@ async fn get_thread(id: String) -> impl Responder {
     HttpResponse::Ok().body(format!("Get thread {}", id))
 }
 
+// create a new thread
 #[post("/threads")]
 async fn create_thread(req_body: String) -> impl Responder {
     HttpResponse::Ok().body("Create thread")
