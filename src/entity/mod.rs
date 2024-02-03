@@ -2,3 +2,4 @@
 
 pub mod prelude;
 pub mod thread;
+pub mod user;
