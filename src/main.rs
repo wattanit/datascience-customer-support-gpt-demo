@@ -7,6 +7,17 @@ use serde::Deserialize;
 use dotenv::dotenv;
 use std::env;
 use crate::entity::user::ActiveModel;
+use migration::{Migrator, MigratorTrait};
+
+// DB Migration
+async fn migrate_db() -> Result<(), DbErr> {
+    let connection = connect_db().await?;  
+
+    Migrator::up(&connection, None).await?;
+    
+    Ok(())
+}
+
 
 async fn connect_db() -> Result<DatabaseConnection, DbErr> { // Replace `sqlx::Error` with `Error`
     dotenv().ok();
@@ -29,7 +40,7 @@ struct NewUser {
 #[post("/users")]
 async fn create_user(req_body: web::Json<NewUser>) -> impl Responder {
     println!("Create user: {:?}", req_body);
-    let db = connect_db().await.unwrap();
+    // let db = connect_db().await.unwrap();
     
     let new_user = ActiveModel {
         name: Set(req_body.name.clone()),
@@ -39,18 +50,19 @@ async fn create_user(req_body: web::Json<NewUser>) -> impl Responder {
 
     println!("New user: {:?}", new_user);
 
-    let result = new_user.save(&db).await;
+    // let result = new_user.save(&db).await;
 
-    match result {
-        Ok(user) => {
-            println!("User created: {:?}", user);
-            HttpResponse::Ok().body("User created")
-        },
-        Err(err) => {
-            println!("Error creating user {:?}", err);
-            HttpResponse::InternalServerError().body("Error creating user")
-        }
-    }
+    // match result {
+    //     Ok(user) => {
+    //         println!("User created: {:?}", user);
+    //         HttpResponse::Ok().body("User created")
+    //     },
+    //     Err(err) => {
+    //         println!("Error creating user {:?}", err);
+    //         HttpResponse::InternalServerError().body("Error creating user")
+    //     }
+    // }
+    HttpResponse::Ok().body("User created")
 }
 
 #[get("/threads")]
@@ -81,6 +93,9 @@ async fn index() -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    println!("Migrating DB");
+    migrate_db().await.unwrap();
+
     println!("Starting server at http://127.0.0.1:8080/");
     HttpServer::new(|| {
         let scope = web::scope("/api/v1")
