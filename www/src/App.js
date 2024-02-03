@@ -1,31 +1,42 @@
 import './App.css';
-import Container from 'react-bootstrap/Container';
-import Row from 'react-bootstrap/Row';
-import Col from 'react-bootstrap/Col';
-import MainWindow from './MainWindow';
+import {useState} from 'react';
+import ChatPage from './ChatPage';
+import LoginPage from './LoginPage';
+import DemoPageNewUser from './DemoPageNewUser';
 
 function App() {
+  let [pageName, setPageName] = useState('loginPage');
+
+  let nextPage = () => {
+    if (pageName === 'loginPage') {
+      setPageName('chatPage');
+    } else if (pageName === 'chatPage') {
+      setPageName('loginPage');
+    }else{
+      setPageName('loginPage');
+    }
+  }
+
+  let demoPage = (nextPageName) => {
+    setPageName(nextPageName);
+  }
+
+
+  let page;
+  if (pageName === 'loginPage') {
+    page = <LoginPage nextPage={nextPage} demoPage={demoPage}/>;
+  } else if (pageName === 'chatPage') {
+    page = <ChatPage nextPage={nextPage}/>;
+  } else if (pageName === 'demoPageNewUser') {
+    page = <DemoPageNewUser nextPage={nextPage}/>;
+  } else {
+    page = <div>Not found</div>;
+  }
+
   return (
-    <Container fluid>
-      <Row>
-        <Col>
-        Header
-        </Col>
-      </Row>
-      <Row>
-        <Col xs={12} md={8} className='mainWindow'>
-          <MainWindow/>
-        </Col>
-        <Col xs={0} md={4}>
-          Log window
-        </Col>
-      </Row>
-      <Row>
-        <Col>
-          Footer
-        </Col>
-      </Row>
-    </Container>
+    <>
+      {page}
+    </>
   );
 }
 

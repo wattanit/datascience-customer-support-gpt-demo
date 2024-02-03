@@ -11,3 +11,12 @@
 .chatMessage{
   margin: 1em;
 }
+
+.loginPage{
+  height: 80vh;
+  margin-top: 2em;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+}
