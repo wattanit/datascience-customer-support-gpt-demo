@@ -10,6 +10,7 @@ enum Thread {
     Title,
     AssistantId,
     CustomerId,
+    RunId,
     Status,
     Messages,
 }
@@ -31,6 +32,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Thread::Title).string().not_null())
                     .col(ColumnDef::new(Thread::AssistantId).string().not_null())
                     .col(ColumnDef::new(Thread::CustomerId).integer().not_null())
+                    .col(ColumnDef::new(Thread::RunId).string().not_null())
                     .col(ColumnDef::new(Thread::Status).string().not_null())
                     .col(ColumnDef::new(Thread::Messages).string().not_null())
                     .to_owned(),

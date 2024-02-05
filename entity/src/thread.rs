@@ -10,6 +10,7 @@ pub struct Model {
     pub title: String,
     pub assistant_id: String,
     pub customer_id: i32,
+    pub run_id: String,
     pub status: String,
     pub messages: String,
 }

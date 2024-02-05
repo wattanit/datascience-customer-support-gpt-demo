@@ -1,6 +1,5 @@
 use actix_web::{delete, get, post, web, HttpResponse, Responder};
-use sea_orm::EntityTrait;
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{ActiveModelTrait, EntityTrait, Unchanged, NotSet, Set};
 use serde::{Deserialize, Serialize};
 use crate::utils::{get_assistant_id, get_openai_token, connect_db};
 use entity::thread::{self, ActiveModel};
@@ -28,15 +27,33 @@ pub struct Message{
 pub struct MessageContent{
     // renamed field type to typeString
     #[serde(rename = "type")]
-    pub type_strig: String,
+    pub type_string: String,
     pub text: MessageContentText,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MessageContentText{
     pub value: String,
-    pub annotations: Vec<String>,
+    pub annotations: Vec<MessageContentTextAnnotation>,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MessageContentTextAnnotation{
+    #[serde(rename = "type")]
+    pub type_string: String,
+    pub text: String,
+    pub start_index: i32,
+    pub end_index: i32,
+    pub file_citation: Option<MessageContentTextAnnotationFileCitation>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MessageContentTextAnnotationFileCitation{
+    pub file_id: String,
+    pub quote: String,
+}
+
+
 
 #[get("/threads")]
 pub async fn get_threads() -> impl Responder {
@@ -54,6 +71,7 @@ pub struct GetThreadResponse {
 
 #[get("/threads/{id}")]
 pub async fn get_thread(id: web::Path<String>) -> impl Responder {
+    let openai_token = get_openai_token().await.unwrap();
     
     // check if thread status is complete
     println!("Get thread: {}", &id);
@@ -93,11 +111,128 @@ pub async fn get_thread(id: web::Path<String>) -> impl Responder {
 
                 HttpResponse::Ok().json(res)   
             } else {
-                // get thread messages from OpenAI
+                // get run_id from database
+                let run_id = thread.run_id.clone();
+                // retrieve run status from OpenAI
+                let client = awc::Client::default();
+                
+                // https://api.openai.com/v1/threads/thread_clmmpnNvwn09Xi1jzJ1EbxKY/runs/run_Hc7DYLXdkpsIBvSIRVJmB59g
+                let response = client.get(format!("https://api.openai.com/v1/threads/{}/runs/{}", &thread.id, &thread.run_id))
+                    .insert_header(("Content-Type", "application/json"))
+                    .insert_header(("Authorization", format!("Bearer {}", &openai_token)))
+                    .insert_header(("OpenAI-Beta", "assistants=v1"))
+                    .send()
+                    .await;
 
-                // update thread status to complete
+                match response {
+                    Ok(mut res) => {
+                        #[derive(Deserialize, Debug)]
+                        struct ResponseBody {
+                            pub id: String,
+                            pub object: String,
+                            pub created_at: i64,
+                            pub assistant_id: String,
+                            pub thread_id: String,
+                            pub status: String,
+                        }
 
-                HttpResponse::Ok().body(format!("Get thread {}: RUNING", id))
+                        let run_body = res.json::<ResponseBody>().await.unwrap();
+                        
+                        if run_body.status == "completed" {
+                            // get thread messages from OpenAI
+                            let response = client.get(format!("https://api.openai.com/v1/threads/{}/messages", &thread.id))
+                                .insert_header(("Content-Type", "application/json"))
+                                .insert_header(("Authorization", format!("Bearer {}", &openai_token)))
+                                .insert_header(("OpenAI-Beta", "assistants=v1"))
+                                .send()
+                                .await;
+                                  
+                            #[derive(Deserialize, Debug)]
+                            struct ResponseBody {
+                                pub object: String,
+                                pub data: Vec<Message>,
+                                pub first_id: String,
+                                pub last_id: String,
+                                pub has_more: bool,
+                            }
+
+                            match response {
+                                Ok(mut res) => {
+                                    let body = res.json::<ResponseBody>().await.unwrap();
+                                    println!("Get messages: {:?}", &body);
+
+                                    // update thread status to complete
+                                    let mut thread: thread::ActiveModel = thread.into();
+                                    thread.status = Set("done".to_string());
+
+                                    let messages = body.data;
+                                    let mut compact_messages: Vec<CompactMessage> = vec![];
+                                    for message in messages {
+                                        compact_messages.push(CompactMessage {
+                                            role: message.role.clone(),
+                                            message: message.content[0].text.value.clone(),
+                                        });
+                                    }
+
+                                    let serialized_messages = serde_json::to_string(&compact_messages).unwrap();
+                                    thread.messages = Set(serialized_messages);
+
+                                    let result = thread.save(&db).await;
+                                    match result {
+                                        Ok(thread) => {
+                                            println!("Thread status updated to complete: {:?}", &id);
+                                            let res = GetThreadResponse {
+                                                thread_id: thread.get(thread::Column::Id).unwrap().to_string(),
+                                                title: thread.get(thread::Column::Title).unwrap().to_string(),
+                                                assistant_id: thread.get(thread::Column::AssistantId).unwrap().to_string(),
+                                                status: "done".to_string(),
+                                                messages: compact_messages,
+                                            };
+
+                                            HttpResponse::Ok().json(res)
+                                        },
+                                        Err(err) => {
+                                            println!("Error updating thread status {:?}", err);
+                                            HttpResponse::InternalServerError().body("Error updating thread status")
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Error calling OpenAI: {:?}", e);
+                                    HttpResponse::InternalServerError().body("Error calling OpenAI")
+                                }
+                            }
+                        }else{
+                            // return thread messages from database
+                            let serialized_messages = thread.messages;
+                            let messeges: Vec<CompactMessage> = if serialized_messages.is_empty() {
+                                vec![]
+                            } else {
+                                match serde_json::from_str(&serialized_messages) {
+                                    Ok(messages) => messages,
+                                    Err(err) => {
+                                        println!("Error deserializing messages: {:?}", err);
+                                        vec![]
+                                    }
+                                }
+                            };
+
+                            let res = GetThreadResponse {
+                                thread_id: thread.id.clone(),
+                                title: thread.title.clone(),
+                                assistant_id: thread.assistant_id.clone(),
+                                status: thread.status.clone(),
+                                messages: messeges,
+                            };
+
+                            HttpResponse::Ok().json(res)
+                        }
+                    }
+                    Err(e) => {
+                        println!("Error calling OpenAI: {:?}", e);
+                        HttpResponse::InternalServerError().body("Error calling OpenAI")
+                    }
+                }
             }
         },
         None => {
@@ -117,6 +252,7 @@ pub struct CreateThreadResponse {
     thread_id: String,
     title: String,
     assistant_id: String,
+    run_id: String,
 }
 
 // create a new thread
@@ -130,17 +266,23 @@ pub async fn create_thread(req_body: web::Json<CreateThreadPayload>) -> impl Res
     let client = awc::Client::default();
 
     #[derive(Serialize)]
-    struct RequestBody {};
-    let req = RequestBody {};
+    struct RequestBody {
+        pub assistant_id: String,
+    };
+    let req = RequestBody {
+        assistant_id: assistant_id.clone(),
+    };      
 
     #[derive(Deserialize, Debug)]
     struct ResponseBody {
         pub id: String,
         pub object: String,
         pub created_at: i64,
+        pub assistant_id: String,
+        pub thread_id: String,
     }
 
-    let response = client.post("https://api.openai.com/v1/threads")
+    let response = client.post("https://api.openai.com/v1/threads/runs")
         .insert_header(("Content-Type", "application/json"))
         .insert_header(("Authorization", format!("Bearer {}", &openai_token)))
         .insert_header(("OpenAI-Beta", "assistants=v1"))
@@ -156,10 +298,11 @@ pub async fn create_thread(req_body: web::Json<CreateThreadPayload>) -> impl Res
             let db = connect_db().await.unwrap();
             
             let new_thread = ActiveModel {
-                id: Set(body.id.clone()),
+                id: Set(body.thread_id.clone()),
                 title: Set(format!("สวัสดีค่ะ คุณ {}", &req_body.name)),
                 assistant_id: Set(assistant_id),
                 customer_id: Set(req_body.customer_id),
+                run_id: Set(body.id.clone()),
                 status: Set("done".to_string()),
                 messages: Set("".to_string()),
             };
@@ -174,6 +317,7 @@ pub async fn create_thread(req_body: web::Json<CreateThreadPayload>) -> impl Res
                         thread_id: thread.id.clone(),
                         title: thread.title.clone(),
                         assistant_id: thread.assistant_id.clone(),
+                        run_id: thread.run_id.clone(),
                     };
 
                     HttpResponse::Ok().json(res)
@@ -291,13 +435,29 @@ pub async fn create_message(req_body: web::Json<CreateMessagePayload>) -> impl R
 
             match thread {
                 Some(thread)=>{
+
+                    let old_messages = thread.messages.clone();
+
                     let mut thread: thread::ActiveModel = thread.into();
                     thread.status = Set("waiting".to_string());
-                    
-                    let messages = vec![CompactMessage {
+
+                    // append message to thread messages
+                    let mut messages: Vec<CompactMessage> = if old_messages.is_empty() {
+                        vec![]
+                    } else {
+                        match serde_json::from_str(&old_messages) {
+                            Ok(messages) => messages,
+                            Err(err) => {
+                                println!("Error deserializing messages: {:?}", err);
+                                vec![]
+                            }
+                        }
+                    };
+
+                    messages.push(CompactMessage {
                         role: body.role.clone(),
                         message: body.content[0].text.value.clone(),
-                    }];
+                    });
 
                     let serialized_messages = serde_json::to_string(&messages).unwrap();
                     thread.messages = Set(serialized_messages);
