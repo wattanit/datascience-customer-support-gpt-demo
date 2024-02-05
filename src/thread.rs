@@ -1,6 +1,10 @@
 use actix_web::{delete, get, post, web, HttpResponse, Responder};
+use sea_orm::EntityTrait;
+use sea_orm::{ActiveModelTrait, Set};
 use serde::{Serialize, Deserialize};
 use crate::utils::{get_assistant_id, get_openai_token, connect_db};
+use entity::thread::ActiveModel;
+use entity::thread::Entity as Thread;
 
 #[get("/threads")]
 pub async fn get_threads() -> impl Responder {
@@ -20,12 +24,18 @@ pub async fn get_thread(id: String) -> impl Responder {
     HttpResponse::Ok().body(format!("Get thread {}", id))
 }
 
+#[derive(Deserialize, Debug)]
+pub struct CreateThreadPayload {
+    pub name: String,
+    pub customer_id: i32,
+}
+
 // create a new thread
 #[post("/threads")]
-pub async fn create_thread(req_body: String) -> impl Responder {
+pub async fn create_thread(req_body: web::Json<CreateThreadPayload>) -> impl Responder {
     // get assistant ID
     let openai_token = get_openai_token().await.unwrap();
-    // let assistant_id = get_assistant_id().await.unwrap();
+    let assistant_id = get_assistant_id().await.unwrap();
 
     // create new thread on OpenAI
     let client = awc::Client::default();
@@ -51,15 +61,31 @@ pub async fn create_thread(req_body: String) -> impl Responder {
     match response {
         Ok(mut res) => {
             let body = res.json::<ResponseBody>().await.unwrap();
-            // let body = res.body().await.unwrap();
             println!("Created thread on OpenAI: {:?}", &body);
 
-            // let db = connect_db().await.unwrap();
-
             // create new thread entry in database
+            let db = connect_db().await.unwrap();
+            
+            let new_thread = ActiveModel {
+                id: Set(body.id.clone()),
+                title: Set(format!("สวัสดีค่ะ คุณ {}", &req_body.name)),
+                assistant_id: Set(assistant_id),
+                customer_id: Set(req_body.customer_id),
+            };
 
-            // return response
-            HttpResponse::Ok().body("Create thread")
+            let result = new_thread.insert(&db).await;
+
+            match result {
+                Ok(thread) => {
+                    println!("Thread created: {:?}", thread);
+                    HttpResponse::Ok().body("Create thread")
+                },
+                Err(err) => {
+                    println!("Error creating thread {:?}", err);
+                    println!("However, OpenAI thread has been created id: {}", &body.id);
+                    HttpResponse::InternalServerError().body("Error creating thread")
+                }
+            }
         }
         Err(e) => {
             println!("Error calling OpenAI: {:?}", e);
@@ -76,12 +102,7 @@ pub async fn delete_thread(id: web::Path<String>) -> impl Responder {
     let openai_token = get_openai_token().await.unwrap();
 
     let client = awc::Client::default();
-
-    // {
-    //     "id": "thread_abc123",
-    //     "object": "thread.deleted",
-    //     "deleted": true
-    //   }
+    
     #[derive(Deserialize, Debug)]
     struct ResponseBody {
         pub id: String,
@@ -101,9 +122,23 @@ pub async fn delete_thread(id: web::Path<String>) -> impl Responder {
             println!("Delete thread: {:?}", &body);
 
             // delete thread from database
+            let db = connect_db().await.unwrap();
 
-            // return response
-            HttpResponse::Ok().body(format!("Delete thread {}", &id))
+            let result = Thread::delete_by_id(&id.clone())
+                .exec(&db)
+                .await;
+
+            match result {
+                Ok(_) => {
+                    println!("Thread deleted: {:?}", &id);
+                    HttpResponse::Ok().body(format!("Delete thread {}", &id))
+                },
+                Err(err) => {
+                    println!("Error deleting thread {:?}", err);
+                    println!("However, OpenAI thread has been deleted id: {}", &id);
+                    HttpResponse::InternalServerError().body(format!("Error deleting thread {}", &id))
+                }
+            }
         }
         Err(e) => {
             println!("Error calling OpenAI: {:?}", e);
