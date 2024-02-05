@@ -10,6 +10,7 @@ enum Thread {
     Title,
     AssistantId,
     CustomerId,
+    Status,
 }
 
 #[async_trait::async_trait]
@@ -29,6 +30,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Thread::Title).string().not_null())
                     .col(ColumnDef::new(Thread::AssistantId).string().not_null())
                     .col(ColumnDef::new(Thread::CustomerId).integer().not_null())
+                    .col(ColumnDef::new(Thread::Status).string().not_null())
                     .to_owned(),
             )
             .await
