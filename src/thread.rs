@@ -1,9 +1,10 @@
 use actix_web::{delete, get, post, web, HttpResponse, Responder};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde::{Deserialize, Serialize};
-use crate::utils::{get_assistant_id, get_openai_token, connect_db};
 use entity::thread::{self, ActiveModel};
 use entity::thread::Entity as Thread;
+use crate::utils::{get_assistant_id, get_openai_token, connect_db};
+use crate::openai::Message;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CompactMessage {
@@ -13,59 +14,29 @@ pub struct CompactMessage {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Message{
-    pub id: String,
-    pub object: String,
-    pub created_at: i64,
-    pub thread_id: String,
-    pub role: String,
-    pub content: Vec<MessageContent>,
-    pub assistant_id: Option<String>,
-    pub run_id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct MessageContent{
-    // renamed field type to typeString
-    #[serde(rename = "type")]
-    pub type_string: String,
-    pub text: MessageContentText,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct MessageContentText{
-    pub value: String,
-    pub annotations: Vec<MessageContentTextAnnotation>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct MessageContentTextAnnotation{
-    #[serde(rename = "type")]
-    pub type_string: String,
-    pub text: String,
-    pub start_index: i32,
-    pub end_index: i32,
-    pub file_citation: Option<MessageContentTextAnnotationFileCitation>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct MessageContentTextAnnotationFileCitation{
-    pub file_id: String,
-    pub quote: String,
-}
-
-#[get("/threads")]
-pub async fn get_threads() -> impl Responder {
-    HttpResponse::Ok().body("Get threads list")
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct GetThreadResponse {
     pub thread_id: String,
     pub title: String,
     pub assistant_id: String,
     pub status: String,
     pub messages: Vec<CompactMessage>,
+}
+
+fn get_messages(t: &thread::Model) -> Vec<CompactMessage> {
+    let serialized_messages = t.messages.clone();
+
+    let messeges: Vec<CompactMessage> = if serialized_messages.is_empty() {
+        vec![]
+    } else {
+        match serde_json::from_str(&serialized_messages) {
+            Ok(messages) => messages,
+            Err(err) => {
+                println!("Error deserializing messages: {:?}", err);
+                vec![]
+            }
+        }
+    };
+    messeges
 }
 
 #[get("/threads/{id}")]
@@ -87,18 +58,7 @@ pub async fn get_thread(id: web::Path<String>) -> impl Responder {
             // let thread: thread::ActiveModel = thread.into();
             if thread.status == "done" {
                 // return thread messages from database
-                let serialized_messages = thread.messages;
-                let messeges: Vec<CompactMessage> = if serialized_messages.is_empty() {
-                    vec![]
-                } else {
-                    match serde_json::from_str(&serialized_messages) {
-                        Ok(messages) => messages,
-                        Err(err) => {
-                            println!("Error deserializing messages: {:?}", err);
-                            vec![]
-                        }
-                    }
-                };
+                let messeges = get_messages(&thread);
 
                 let res = GetThreadResponse {
                     thread_id: thread.id.clone(),
@@ -110,12 +70,9 @@ pub async fn get_thread(id: web::Path<String>) -> impl Responder {
 
                 HttpResponse::Ok().json(res)   
             } else {
-                // get run_id from database
-                let run_id = thread.run_id.clone();
                 // retrieve run status from OpenAI
                 let client = awc::Client::default();
                 
-                // https://api.openai.com/v1/threads/thread_clmmpnNvwn09Xi1jzJ1EbxKY/runs/run_Hc7DYLXdkpsIBvSIRVJmB59g
                 let response = client.get(format!("https://api.openai.com/v1/threads/{}/runs/{}", &thread.id, &thread.run_id))
                     .insert_header(("Content-Type", "application/json"))
                     .insert_header(("Authorization", format!("Bearer {}", &openai_token)))
@@ -127,11 +84,11 @@ pub async fn get_thread(id: web::Path<String>) -> impl Responder {
                     Ok(mut res) => {
                         #[derive(Deserialize, Debug)]
                         struct ResponseBody {
-                            pub id: String,
-                            pub object: String,
-                            pub created_at: i64,
-                            pub assistant_id: String,
-                            pub thread_id: String,
+                            // pub id: String,
+                            // pub object: String,
+                            // pub created_at: i64,
+                            // pub assistant_id: String,
+                            // pub thread_id: String,
                             pub status: String,
                         }
 
@@ -148,11 +105,11 @@ pub async fn get_thread(id: web::Path<String>) -> impl Responder {
                                   
                             #[derive(Deserialize, Debug)]
                             struct ResponseBody {
-                                pub object: String,
+                                // pub object: String,
                                 pub data: Vec<Message>,
-                                pub first_id: String,
-                                pub last_id: String,
-                                pub has_more: bool,
+                                // pub first_id: String,
+                                // pub last_id: String,
+                                // pub has_more: bool,
                             }
 
                             match response {
@@ -204,18 +161,7 @@ pub async fn get_thread(id: web::Path<String>) -> impl Responder {
                             }
                         }else{
                             // return thread messages from database
-                            let serialized_messages = thread.messages;
-                            let messeges: Vec<CompactMessage> = if serialized_messages.is_empty() {
-                                vec![]
-                            } else {
-                                match serde_json::from_str(&serialized_messages) {
-                                    Ok(messages) => messages,
-                                    Err(err) => {
-                                        println!("Error deserializing messages: {:?}", err);
-                                        vec![]
-                                    }
-                                }
-                            };
+                            let messeges = get_messages(&thread);
 
                             let res = GetThreadResponse {
                                 thread_id: thread.id.clone(),
@@ -266,14 +212,14 @@ pub async fn create_thread(req_body: web::Json<CreateThreadPayload>) -> impl Res
     let client = awc::Client::default();
 
     #[derive(Serialize)]
-    struct RequestBody {};
+    struct RequestBody {}
     let req = RequestBody {};      
 
     #[derive(Deserialize, Debug)]
     struct ResponseBody {
         pub id: String,
-        pub object: String,
-        pub created_at: i64,
+        // pub object: String,
+        // pub created_at: i64,
     }
 
     let response = client.post("https://api.openai.com/v1/threads")
@@ -341,9 +287,9 @@ pub async fn delete_thread(id: web::Path<String>) -> impl Responder {
     
     #[derive(Deserialize, Debug)]
     struct ResponseBody {
-        pub id: String,
-        pub object: String,
-        pub deleted: bool,
+        // pub id: String,
+        // pub object: String,
+        // pub deleted: bool,
     }
 
     let response = client.delete(format!("https://api.openai.com/v1/threads/{}", &id))
@@ -440,13 +386,13 @@ pub async fn create_message(req_body: web::Json<CreateMessagePayload>) -> impl R
                     #[derive(Deserialize, Debug)]
                     struct RunResponseBody {
                         pub id: String,
-                        pub object: String,
-                        pub created_at: i64,
-                        pub assistant_id: String,
-                        pub thread_id: String,
-                        pub status: String,
-                        pub model: String,
-                        pub instructions: Option<String>,
+                        // pub object: String,
+                        // pub created_at: i64,
+                        // pub assistant_id: String,
+                        // pub thread_id: String,
+                        // pub status: String,
+                        // pub model: String,
+                        // pub instructions: Option<String>,
                     }
                     let run_body = res.json::<RunResponseBody>().await.unwrap();
                     println!("Created run on OpenAI: {:?}", &run_body);
