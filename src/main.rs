@@ -3,8 +3,9 @@ mod thread;
 mod utils;
 
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
+use serde::de;
 use user::{get_user, create_user, login};
-use thread::{get_thread, get_threads, create_thread, create_message};
+use thread::{get_thread, get_threads, create_thread, create_message, delete_thread};
 
 #[get("/")]
 async fn index() -> impl Responder {
@@ -23,6 +24,7 @@ async fn main() -> std::io::Result<()> {
             .service(get_threads)
             .service(get_thread)
             .service(create_thread)
+            .service(delete_thread)
             .service(create_message);
         App::new().service(scope)
     })
