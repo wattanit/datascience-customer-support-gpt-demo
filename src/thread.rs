@@ -1,6 +1,6 @@
-use actix_web::{delete, get, post, web, App, HttpResponse, HttpServer, Responder};
-use serde::Serialize;
-use crate::utils::{get_assistant_id, get_openai_token};
+use actix_web::{delete, get, post, web, HttpResponse, Responder};
+use serde::{Serialize, Deserialize};
+use crate::utils::{get_assistant_id, get_openai_token, connect_db};
 
 #[get("/threads")]
 pub async fn get_threads() -> impl Responder {
@@ -25,7 +25,7 @@ pub async fn get_thread(id: String) -> impl Responder {
 pub async fn create_thread(req_body: String) -> impl Responder {
     // get assistant ID
     let openai_token = get_openai_token().await.unwrap();
-    let assistant_id = get_assistant_id().await.unwrap();
+    // let assistant_id = get_assistant_id().await.unwrap();
 
     // create new thread on OpenAI
     let client = awc::Client::default();
@@ -34,17 +34,27 @@ pub async fn create_thread(req_body: String) -> impl Responder {
     struct RequestBody {};
     let req = RequestBody {};
 
+    #[derive(Deserialize, Debug)]
+    struct ResponseBody {
+        pub id: String,
+        pub object: String,
+        pub created_at: i64,
+    }
+
     let response = client.post("https://api.openai.com/v1/threads")
         .insert_header(("Content-Type", "application/json"))
-        .insert_header(("Authorization", format!("Bearer {}", openai_token)))
+        .insert_header(("Authorization", format!("Bearer {}", &openai_token)))
         .insert_header(("OpenAI-Beta", "assistants=v1"))
         .send_json(&req)
         .await;
 
     match response {
         Ok(mut res) => {
-            let body = res.body().await.unwrap();
-            println!("Response: {:?}", body);
+            let body = res.json::<ResponseBody>().await.unwrap();
+            // let body = res.body().await.unwrap();
+            println!("Created thread on OpenAI: {:?}", &body);
+
+            // let db = connect_db().await.unwrap();
 
             // create new thread entry in database
 
@@ -61,22 +71,34 @@ pub async fn create_thread(req_body: String) -> impl Responder {
 #[delete("/threads/{id}")]
 pub async fn delete_thread(id: web::Path<String>) -> impl Responder {
     // delete thread from OpenAI
-    println!("Delete thread {}", &id);
+    println!("Delete thread on OpenAI: {}", &id);
 
     let openai_token = get_openai_token().await.unwrap();
 
     let client = awc::Client::default();
 
+    // {
+    //     "id": "thread_abc123",
+    //     "object": "thread.deleted",
+    //     "deleted": true
+    //   }
+    #[derive(Deserialize, Debug)]
+    struct ResponseBody {
+        pub id: String,
+        pub object: String,
+        pub deleted: bool,
+    }
+
     let response = client.delete(format!("https://api.openai.com/v1/threads/{}", &id))
         .insert_header(("Content-Type", "application/json"))
-        .insert_header(("Authorization", format!("Bearer {}", openai_token)))
+        .insert_header(("Authorization", format!("Bearer {}", &openai_token)))
         .insert_header(("OpenAI-Beta", "assistants=v1"))
         .send().await;
 
     match response {
         Ok(mut res) => {
-            let body = res.body().await.unwrap();
-            println!("Delete thread: {:?}", body);
+            let body = res.json::<ResponseBody>().await.unwrap();
+            println!("Delete thread: {:?}", &body);
 
             // delete thread from database
 
