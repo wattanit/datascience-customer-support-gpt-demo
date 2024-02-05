@@ -43,6 +43,15 @@ pub async fn get_threads() -> impl Responder {
     HttpResponse::Ok().body("Get threads list")
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GetThreadResponse {
+    pub thread_id: String,
+    pub title: String,
+    pub assistant_id: String,
+    pub status: String,
+    pub messages: Vec<CompactMessage>,
+}
+
 #[get("/threads/{id}")]
 pub async fn get_thread(id: web::Path<String>) -> impl Responder {
     
@@ -61,7 +70,28 @@ pub async fn get_thread(id: web::Path<String>) -> impl Responder {
             // let thread: thread::ActiveModel = thread.into();
             if thread.status == "done" {
                 // return thread messages from database
-                HttpResponse::Ok().body(format!("Get thread {}: DONE", id))
+                let serialized_messages = thread.messages;
+                let messeges: Vec<CompactMessage> = if serialized_messages.is_empty() {
+                    vec![]
+                } else {
+                    match serde_json::from_str(&serialized_messages) {
+                        Ok(messages) => messages,
+                        Err(err) => {
+                            println!("Error deserializing messages: {:?}", err);
+                            vec![]
+                        }
+                    }
+                };
+
+                let res = GetThreadResponse {
+                    thread_id: thread.id.clone(),
+                    title: thread.title.clone(),
+                    assistant_id: thread.assistant_id.clone(),
+                    status: thread.status.clone(),
+                    messages: messeges,
+                };
+
+                HttpResponse::Ok().json(res)   
             } else {
                 // get thread messages from OpenAI
 
