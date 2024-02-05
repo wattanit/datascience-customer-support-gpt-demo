@@ -18,3 +18,4 @@ serde = { version = "1.0", features = ["derive"] }
 dotenv = "0.15"
 awc = { version = "3.4", features = ["openssl"]}
 openssl = "0.10"
+serde_json = "1.0"

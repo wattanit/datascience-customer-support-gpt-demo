@@ -1773,6 +1773,7 @@ dependencies = [
  "openssl",
  "sea-orm",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
