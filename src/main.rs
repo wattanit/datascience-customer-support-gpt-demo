@@ -1,29 +1,10 @@
 mod user;
+mod thread;
 mod utils;
 
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use user::{get_user, create_user, login};
-
-#[get("/threads")]
-async fn get_threads() -> impl Responder {
-    HttpResponse::Ok().body("Get threads list")
-}
-
-#[get("/threads/{id}")]
-async fn get_thread(id: String) -> impl Responder {
-    HttpResponse::Ok().body(format!("Get thread {}", id))
-}
-
-// create a new thread
-#[post("/threads")]
-async fn create_thread(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body("Create thread")
-}
-
-#[post("/threads/{id}/message")]
-async fn create_message(id: String, req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(format!("Create message in thread {}", id))
-}
+use thread::{get_thread, get_threads, create_thread, create_message};
 
 #[get("/")]
 async fn index() -> impl Responder {
